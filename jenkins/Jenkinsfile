@@ -1,0 +1,49 @@
+pipeline {
+  agent any
+  environment {
+    AWS_REGION = 'us-east-1'
+    ECR_REPO = "<YOUR_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/reactapp"
+    AWS_CREDS = 'aws-creds'   // Jenkins credentials ID
+  }
+  stages {
+    stage('Checkout'){steps{checkout scm}}
+
+    stage('Terraform Apply'){
+      steps{
+        withCredentials([[$class:'UsernamePasswordMultiBinding',credentialsId:AWS_CREDS,usernameVariable:'AWS_ACCESS_KEY_ID',passwordVariable:'AWS_SECRET_ACCESS_KEY']]){
+          dir('infra'){
+            sh 'terraform init -input=false'
+            sh 'terraform apply -auto-approve'
+          }
+        }
+      }
+    }
+
+    stage('Build Docker Image'){steps{sh 'jenkins/scripts/build.sh $ECR_REPO $BUILD_NUMBER'}}
+
+    stage('Trivy Scan'){steps{sh 'jenkins/scripts/trivy-scan.sh $ECR_REPO:$BUILD_NUMBER'}}
+
+    stage('Push to ECR'){
+      steps{
+        withCredentials([[$class:'UsernamePasswordMultiBinding',credentialsId:AWS_CREDS,usernameVariable:'AWS_ACCESS_KEY_ID',passwordVariable:'AWS_SECRET_ACCESS_KEY']]){
+          sh 'jenkins/scripts/push.sh $ECR_REPO $BUILD_NUMBER $AWS_REGION'
+        }
+      }
+    }
+
+    stage('tfsec Scan'){steps{sh 'jenkins/scripts/tfsec-scan.sh infra'}}
+
+    stage('Deploy to EKS'){
+      steps{
+        withCredentials([[$class:'UsernamePasswordMultiBinding',credentialsId:AWS_CREDS,usernameVariable:'AWS_ACCESS_KEY_ID',passwordVariable:'AWS_SECRET_ACCESS_KEY']]){
+          sh '''
+            aws eks update-kubeconfig --name reactapp-cluster --region $AWS_REGION
+            helm upgrade --install reactapp helm/reactapp --set image.repository=$ECR_REPO --set image.tag=$BUILD_NUMBER
+          '''
+        }
+      }
+    }
+  }
+  post{always{echo 'Pipeline completed'}}
+}
+

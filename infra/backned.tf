@@ -1,9 +1,9 @@
 terraform {
   backend "s3" {
-    bucket         = "<YOUR_S3_BUCKET>"
+    bucket         = "terraform-backned-bucket-756"
     key            = "reactapp/terraform.tfstate"
     region         = "us-east-1"
-    dynamodb_table = "<YOUR_DYNAMODB_TABLE>"
+    dynamodb_table = "terraform-state-lock"
     encrypt        = true
   }
 }
